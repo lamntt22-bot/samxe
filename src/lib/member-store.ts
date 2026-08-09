@@ -1,13 +1,13 @@
 import { getSupabase } from "@/lib/supabase";
 import type { AudienceId, ProductId } from "@/lib/leads";
-import type {
-  MemberRecord,
-  MemberRole,
-  MemberTier,
-  MemberWithHash,
-  RegisterPayload,
-  UpgradeRequestRecord,
-  UpgradeRequestStatus,
+import {
+  buildMemberStats,
+  type MemberRecord,
+  type MemberRole,
+  type MemberStats,
+  type MemberWithHash,
+  type OrderRecord,
+  type RegisterPayload,
 } from "@/lib/members";
 
 interface MemberRow {
@@ -17,21 +17,20 @@ interface MemberRow {
   email: string;
   password_hash: string;
   role: string;
-  tier: string;
   audience: string;
   interested_product: string | null;
   note: string | null;
+  referred_by: string | null;
   must_change_password: boolean;
   created_at: string;
 }
 
-interface UpgradeRequestRow {
+interface OrderRow {
   id: string;
   member_id: string;
-  status: string;
+  amount: number;
   note: string | null;
   created_at: string;
-  resolved_at: string | null;
 }
 
 function toMemberWithHash(row: MemberRow): MemberWithHash {
@@ -42,12 +41,12 @@ function toMemberWithHash(row: MemberRow): MemberWithHash {
     email: row.email,
     passwordHash: row.password_hash,
     role: row.role as MemberRole,
-    tier: row.tier as MemberTier,
     audience: row.audience as AudienceId,
     interestedProduct: (row.interested_product ?? undefined) as
       | ProductId
       | undefined,
     note: row.note ?? undefined,
+    referredBy: row.referred_by ?? undefined,
     mustChangePassword: row.must_change_password,
     createdAt: row.created_at,
   };
@@ -58,14 +57,13 @@ function toMemberRecord(row: MemberRow): MemberRecord {
   return rest;
 }
 
-function toUpgradeRequest(row: UpgradeRequestRow): UpgradeRequestRecord {
+function toOrderRecord(row: OrderRow): OrderRecord {
   return {
     id: row.id,
     memberId: row.member_id,
-    status: row.status as UpgradeRequestStatus,
+    amount: row.amount,
     note: row.note ?? undefined,
     createdAt: row.created_at,
-    resolvedAt: row.resolved_at ?? undefined,
   };
 }
 
@@ -115,6 +113,19 @@ export async function createMember(
   payload: RegisterPayload,
   passwordHash: string,
 ): Promise<MemberRecord> {
+  // Referral must point at a real, existing member — otherwise silently
+  // drop it rather than fail the whole registration over a stale/forged/
+  // malformed (e.g. non-uuid) link.
+  let referredBy: string | null = null;
+  if (payload.referredBy) {
+    try {
+      const referrer = await findMemberById(payload.referredBy);
+      if (referrer) referredBy = referrer.id;
+    } catch {
+      referredBy = null;
+    }
+  }
+
   const { data, error } = await getSupabase()
     .from("members")
     .insert({
@@ -125,6 +136,7 @@ export async function createMember(
       audience: payload.audience,
       interested_product: payload.product ?? null,
       note: payload.note ?? null,
+      referred_by: referredBy,
     })
     .select("*")
     .single<MemberRow>();
@@ -156,59 +168,65 @@ export async function listMembers(): Promise<MemberRecord[]> {
   return (data ?? []).map(toMemberRecord);
 }
 
-export async function updateMemberTier(
-  id: string,
-  tier: MemberTier,
-): Promise<void> {
-  const { error } = await getSupabase()
-    .from("members")
-    .update({ tier })
-    .eq("id", id);
+export async function listAllOrders(): Promise<OrderRecord[]> {
+  const { data, error } = await getSupabase()
+    .from("orders")
+    .select("*")
+    .returns<OrderRow[]>();
 
   if (error) throw error;
+  return (data ?? []).map(toOrderRecord);
 }
 
-export async function createUpgradeRequest(
+export async function listOrdersForMember(
   memberId: string,
-  note?: string,
-): Promise<UpgradeRequestRecord> {
+): Promise<OrderRecord[]> {
   const { data, error } = await getSupabase()
-    .from("upgrade_requests")
-    .insert({ member_id: memberId, note: note ?? null })
+    .from("orders")
     .select("*")
-    .single<UpgradeRequestRow>();
-
-  if (error) throw error;
-  return toUpgradeRequest(data);
-}
-
-export async function listUpgradeRequests(): Promise<UpgradeRequestRecord[]> {
-  const { data, error } = await getSupabase()
-    .from("upgrade_requests")
-    .select("*")
+    .eq("member_id", memberId)
     .order("created_at", { ascending: false })
-    .returns<UpgradeRequestRow[]>();
+    .returns<OrderRow[]>();
 
   if (error) throw error;
-  return (data ?? []).map(toUpgradeRequest);
+  return (data ?? []).map(toOrderRecord);
 }
 
-export async function resolveUpgradeRequest(
-  id: string,
-  status: "approved" | "rejected",
-): Promise<UpgradeRequestRecord> {
+export async function createOrder(
+  memberId: string,
+  amount: number,
+  note?: string,
+): Promise<OrderRecord> {
   const { data, error } = await getSupabase()
-    .from("upgrade_requests")
-    .update({ status, resolved_at: new Date().toISOString() })
-    .eq("id", id)
+    .from("orders")
+    .insert({ member_id: memberId, amount, note: note ?? null })
     .select("*")
-    .single<UpgradeRequestRow>();
+    .single<OrderRow>();
 
   if (error) throw error;
+  return toOrderRecord(data);
+}
 
-  if (status === "approved") {
-    await updateMemberTier(data.member_id, "doi-tac");
-  }
+/** Fetches every member + every order once and computes stats for all of them. */
+export async function getAllMemberStats(): Promise<{
+  members: MemberRecord[];
+  statsByMemberId: Map<string, MemberStats>;
+}> {
+  const [members, orders] = await Promise.all([listMembers(), listAllOrders()]);
+  return { members, statsByMemberId: buildMemberStats(members, orders) };
+}
 
-  return toUpgradeRequest(data);
+export async function getMemberStats(memberId: string): Promise<MemberStats> {
+  const { statsByMemberId } = await getAllMemberStats();
+  return (
+    statsByMemberId.get(memberId) ?? {
+      revenue: 0,
+      dealerLevel: 0,
+      dealerDiscountPercent: 0,
+      referredCount: 0,
+      referredAtLevel2PlusCount: 0,
+      affiliateBonusPercent: 0,
+      totalDiscountPercent: 0,
+    }
+  );
 }

@@ -4,6 +4,7 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -11,6 +12,7 @@ import {
 import FloatingContactButton from "@/components/FloatingContactButton";
 import LeadFormModal from "@/components/LeadFormModal";
 import type { AudienceId, ProductId } from "@/lib/leads";
+import { captureReferralFromUrl } from "@/lib/referral";
 
 interface OpenOptions {
   audience?: AudienceId;
@@ -37,6 +39,10 @@ export function LeadCaptureProvider({ children }: { children: ReactNode }) {
   const [isOpen, setIsOpen] = useState(false);
   const [audience, setAudience] = useState<AudienceId | undefined>();
   const [product, setProduct] = useState<ProductId | undefined>();
+
+  useEffect(() => {
+    captureReferralFromUrl();
+  }, []);
 
   const open = useCallback((options?: OpenOptions) => {
     setAudience(options?.audience);

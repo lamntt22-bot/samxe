@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { AUDIENCES, PRODUCTS, type AudienceId, type ProductId } from "@/lib/leads";
+import { getStoredReferralCode } from "@/lib/referral";
 
 interface LeadFormModalProps {
   isOpen: boolean;
@@ -93,6 +94,7 @@ export default function LeadFormModal({
           audience,
           product: product || undefined,
           website,
+          referredBy: getStoredReferralCode(),
         }),
       });
       if (res.status === 429) {

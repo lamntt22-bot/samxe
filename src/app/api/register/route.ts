@@ -18,6 +18,7 @@ const registerSchema = z.object({
   audience: z.enum(audienceIds),
   product: z.enum(productIds).optional(),
   note: z.string().trim().max(1000).optional(),
+  referredBy: z.string().trim().max(100).optional(),
   // honeypot — real users never see or fill this; kept permissive so bots
   // that fill it get a fake success instead of a tell-tale 400
   website: z.string().max(200).optional(),

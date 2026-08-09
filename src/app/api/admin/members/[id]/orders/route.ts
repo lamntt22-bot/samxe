@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAdminFromRequest } from "@/lib/session";
-import { updateMemberTier } from "@/lib/member-store";
+import { createOrder } from "@/lib/member-store";
 
 const schema = z.object({
-  tier: z.enum(["free", "doi-tac"]),
+  amount: z.number().positive().max(100_000_000_000),
+  note: z.string().trim().max(500).optional(),
 });
 
 export async function POST(
   request: NextRequest,
-  ctx: RouteContext<"/api/admin/members/[id]/tier">,
+  ctx: RouteContext<"/api/admin/members/[id]/orders">,
 ) {
   const admin = await requireAdminFromRequest(request);
   if (!admin) {
@@ -22,16 +23,16 @@ export async function POST(
 
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Thông tin chưa hợp lệ." },
+      { error: "Số tiền không hợp lệ." },
       { status: 400 },
     );
   }
 
   try {
-    await updateMemberTier(id, parsed.data.tier);
-    return NextResponse.json({ ok: true });
+    const order = await createOrder(id, parsed.data.amount, parsed.data.note);
+    return NextResponse.json({ ok: true, order });
   } catch (err) {
-    console.error("[admin/members/tier] failed", err);
+    console.error("[admin/members/orders] failed", err);
     return NextResponse.json(
       { error: "Đã xảy ra lỗi, vui lòng thử lại." },
       { status: 500 },
