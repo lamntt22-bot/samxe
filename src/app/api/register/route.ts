@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { appendLead, findExistingLeadByContact } from "@/lib/lead-store";
+import { createMember, findMemberByContact } from "@/lib/member-store";
+import { DEFAULT_MEMBER_PASSWORD, hashPassword } from "@/lib/auth";
 import { isRateLimited } from "@/lib/rate-limit";
 import { AUDIENCES, PRODUCTS, type AudienceId, type ProductId } from "@/lib/leads";
 
 const audienceIds = AUDIENCES.map((a) => a.id) as [AudienceId, ...AudienceId[]];
 const productIds = PRODUCTS.map((p) => p.id) as [ProductId, ...ProductId[]];
 
-const leadSchema = z.object({
+const registerSchema = z.object({
   name: z.string().trim().min(2).max(120),
   phone: z
     .string()
@@ -46,7 +47,7 @@ function getClientIp(request: NextRequest): string {
 export async function POST(request: NextRequest) {
   const ip = getClientIp(request);
 
-  if (isRateLimited(ip)) {
+  if (isRateLimited(`register:${ip}`)) {
     return NextResponse.json(
       { error: "Quá nhiều yêu cầu, vui lòng thử lại sau." },
       { status: 429 },
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
   }
 
   const body = await request.json().catch(() => null);
-  const parsed = leadSchema.safeParse(body);
+  const parsed = registerSchema.safeParse(body);
 
   if (!parsed.success) {
     return NextResponse.json(
@@ -71,21 +72,21 @@ export async function POST(request: NextRequest) {
   const { website: _website, ...payload } = parsed.data;
 
   try {
-    const existing = await findExistingLeadByContact(
-      payload.phone,
-      payload.email,
-    );
+    const existing = await findMemberByContact(payload.phone, payload.email);
 
     if (!existing) {
-      await appendLead(payload);
+      const passwordHash = await hashPassword(DEFAULT_MEMBER_PASSWORD);
+      await createMember(payload, passwordHash);
     }
 
     return NextResponse.json({
       ok: true,
       alreadyRegistered: Boolean(existing),
+      loginId: payload.phone,
+      defaultPassword: existing ? undefined : DEFAULT_MEMBER_PASSWORD,
     });
   } catch (err) {
-    console.error("[register] failed to persist lead", err);
+    console.error("[register] failed to create member", err);
     return NextResponse.json(
       { error: "Đã xảy ra lỗi, vui lòng thử lại." },
       { status: 500 },

@@ -35,6 +35,10 @@ export default function LeadFormModal({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [result, setResult] = useState<{
+    loginId: string;
+    alreadyRegistered: boolean;
+  } | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -42,6 +46,7 @@ export default function LeadFormModal({
       setAudience(initialAudience ?? "nha-xe");
       setProduct(initialProduct ?? "");
       setSubmitError("");
+      setResult(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
@@ -96,11 +101,15 @@ export default function LeadFormModal({
         );
         return;
       }
+      const data = await res.json().catch(() => null);
       if (!res.ok) {
-        const data = await res.json().catch(() => null);
         setSubmitError(data?.error ?? "Có lỗi xảy ra, vui lòng thử lại.");
         return;
       }
+      setResult({
+        loginId: data?.loginId ?? phone.trim(),
+        alreadyRegistered: Boolean(data?.alreadyRegistered),
+      });
       setStep("success");
     } catch {
       setSubmitError("Không kết nối được máy chủ, vui lòng thử lại.");
@@ -283,16 +292,52 @@ export default function LeadFormModal({
             <h2 className="mt-4 text-xl font-bold text-forest-900 sm:text-2xl">
               Cảm ơn bạn đã đăng ký!
             </h2>
-            <p className="mt-2 text-forest-700">
-              Đội ngũ Sâm Xé đã nhận được thông tin và sẽ liên hệ lại với bạn
-              trong vòng 24h qua số điện thoại hoặc email vừa cung cấp.
-            </p>
+
+            {result?.alreadyRegistered ? (
+              <p className="mt-2 text-forest-700">
+                Số điện thoại/email này đã có tài khoản trên hệ thống — vui
+                lòng đăng nhập lại để xem thông tin của bạn.
+              </p>
+            ) : (
+              <>
+                <p className="mt-2 text-forest-700">
+                  Hệ thống đã tạo sẵn tài khoản cho bạn:
+                </p>
+                <div className="mt-3 rounded-xl bg-forest-950/5 p-4 text-left text-sm">
+                  <p>
+                    <span className="text-forest-500">
+                      Tài khoản đăng nhập:
+                    </span>{" "}
+                    <span className="font-semibold text-forest-900">
+                      {result?.loginId}
+                    </span>
+                  </p>
+                  <p className="mt-1">
+                    <span className="text-forest-500">Mật khẩu mặc định:</span>{" "}
+                    <span className="font-semibold text-forest-900">
+                      123456789
+                    </span>
+                  </p>
+                </div>
+                <p className="mt-3 text-sm font-medium text-ruby-600">
+                  Vui lòng đăng nhập và đổi mật khẩu ngay để bảo mật tài
+                  khoản.
+                </p>
+              </>
+            )}
+
+            <a
+              href="/login"
+              className="mt-6 block w-full rounded-xl bg-gold-500 px-6 py-3.5 text-center text-base font-bold text-forest-950 shadow-lg shadow-gold-500/20 transition hover:bg-gold-400"
+            >
+              Đăng nhập ngay
+            </a>
             <button
               type="button"
               onClick={onClose}
-              className="mt-6 w-full rounded-xl bg-forest-800 px-6 py-3.5 text-base font-bold text-cream-50 transition hover:bg-forest-700"
+              className="mt-3 w-full rounded-xl px-6 py-3 text-sm font-semibold text-forest-700 transition hover:bg-forest-950/5"
             >
-              Đóng
+              Để sau, đóng popup
             </button>
           </div>
         )}
